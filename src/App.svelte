@@ -33,7 +33,11 @@
 
   let hasSearched    = false;        // guards “No results found”
 
-  /* ─────────── helpers ─────────── */
+  /* --- constants --- */
+  const AVERAGE_WPM        = 150;      // tweak to suit your speakers
+  const SECONDS_PER_WORD   = 60 / AVERAGE_WPM;
+
+  /* --- helpers --- */
   const formatTime = s =>
     s != null
       ? `${Math.floor(s / 60)}:${Math.floor(s % 60)
@@ -43,6 +47,32 @@
 
   const formatDate = iso =>
     iso ? new Date(iso).toLocaleDateString() : '';
+
+  /** Convert "hh:mm:ss" | "mm:ss" | seconds number to seconds number */
+  function toSeconds(t) {
+    if (typeof t === 'number') return t;
+    if (!t) return 0;
+    return t.split(':').map(Number).reduce((acc, cur) => acc * 60 + cur, 0);
+  }
+
+  /* --- first‑match utilities --- */
+  function wordsBeforeFirstMention(text, termRegex) {
+    if (!termRegex) return 0;
+    const m = termRegex.exec(text);
+    if (!m) return 0;              // term not found (shouldn’t happen)
+    return text
+      .slice(0, m.index)           // text *before* the hit
+      .trim()
+      .split(/\s+/)
+      .filter(Boolean).length;     // # of words preceding the hit
+  }
+
+  function calcJumpSec(row, termRegex) {
+    const words  = wordsBeforeFirstMention(row.text, termRegex);
+    const base   = toSeconds(row.start_time); // seconds into the video where paragraph starts
+    const offset = Math.round(words * SECONDS_PER_WORD); // ≈ seconds into paragraph
+    return Math.max(base + offset - 8, 0); // “-2 s” pre‑roll for context
+  }
 
   /* build regex each time query changes */
   $: highlightRegex = (() => {
@@ -59,8 +89,8 @@
       : text;
   }
 
-  function ytLink(url, t) {
-    const sec = Math.max(Math.round(t - 5), 0);
+  function ytLink(url = '', sec = 0) {
+    if (!url) return '#';
     return `${url}${url.includes('?') ? '&' : '?'}t=${sec}s`;
   }
 
@@ -78,6 +108,12 @@
     error   = null;
     hasSearched = true;
 
+    const termRegex = (() => {
+      const terms =
+        searchQuery.match(/"[^"]+"|\w+/g)?.map(t => t.replace(/"/g, ''));
+      return terms?.length ? new RegExp(`\\b(${terms.join('|')})\\b`, 'i') : null;
+    })();
+
     try {
       const { data, error: rpcError } = await supabase.rpc(
         'search_paragraphs',
@@ -91,7 +127,10 @@
       );
       if (rpcError) throw rpcError;
 
-      results = data ?? [];
+      results = (data ?? []).map(r => ({
+        ...r,
+        jumpSec: calcJumpSec(r, termRegex)
+      }));
 
       if (results.length) {
         totalHits     = results[0].total_hits;
@@ -125,9 +164,9 @@
   });
 
   const sortOptions = [
-  { label: 'Newest first', value: 'date' },
-  { label: 'Relevance', value: 'relevance' }
-];
+    { label: 'Newest first', value: 'date' },
+    { label: 'Relevance', value: 'relevance' }
+  ];
 </script>
 
 <!----- HTML ----->
@@ -223,7 +262,13 @@
                   <span class="time">{formatTime(r.start_time)}</span>
                 {/if}
                 {#if r.video_url}
-                  <a href={ytLink(r.video_url, r.start_time)} target="_blank">Watch ▶</a>
+                <a
+                  href={ytLink(r.video_url, r.jumpSec)}
+                  target="_blank"
+                  rel="noreferrer"
+                >
+                  ▶ Watch clip
+                </a>
                 {/if}
               </footer>
             </li>
@@ -288,6 +333,12 @@
     border-radius:10px;
     padding:1rem;
     margin-bottom:1rem;
+  }
+
+  a {
+    font-size: 0.8rem;
+    font-weight: bold;
+    font-family: "stratos", sans-serif;
   }
   
   /* ---------- Svelte Select ----------- */
