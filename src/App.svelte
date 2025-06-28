@@ -1,0 +1,438 @@
+<script>
+  import { onMount } from 'svelte';
+  import { createClient } from '@supabase/supabase-js';
+  import Select from 'svelte-select';
+
+  /* ─────────── Supabase init ─────────── */
+  const supabase = createClient(
+    import.meta.env.VITE_SUPABASE_URL,
+    import.meta.env.VITE_SUPABASE_ANON_KEY
+  );
+
+  /* ─────────── Reactive state ─────────── */
+  let searchQuery   = '';
+  let results       = [];
+  let loading       = false;
+  let error         = null;
+
+  /* pagination */
+  let currentPage   = 1;
+  const pageSize    = 20;
+  let hasMorePages  = false;
+  let totalHits     = 0;
+  let totalPages    = 0;
+
+  /* summary counts */
+  let totalMeetings = 0;
+  let totalMunis    = 0;
+
+  /* UI controls */
+  let municipalities = [];
+  let muniFilter     = '';           // '' = all
+  let sortBy         = 'date';       // 'relevance' | 'date'
+
+  let hasSearched    = false;        // guards “No results found”
+
+  /* ─────────── helpers ─────────── */
+  const formatTime = s =>
+    s != null
+      ? `${Math.floor(s / 60)}:${Math.floor(s % 60)
+          .toString()
+          .padStart(2, '0')}`
+      : '';
+
+  const formatDate = iso =>
+    iso ? new Date(iso).toLocaleDateString() : '';
+
+  /* build regex each time query changes */
+  $: highlightRegex = (() => {
+    if (!searchQuery.trim()) return null;
+    const terms =
+      searchQuery.match(/"[^"]+"|\w+/g)?.map(t => t.replace(/"/g, ''));
+    if (!terms?.length) return null;
+    return new RegExp(`(${terms.join('|')})`, 'gi');
+  })();
+
+  function highlight(text) {
+    return highlightRegex
+      ? text.replace(highlightRegex, '<mark>$1</mark>')
+      : text;
+  }
+
+  function ytLink(url, t) {
+    const sec = Math.max(Math.round(t - 5), 0);
+    return `${url}${url.includes('?') ? '&' : '?'}t=${sec}s`;
+  }
+
+  /* ─────────── Search RPC ─────────── */
+  async function searchParagraphs() {
+    if (!searchQuery.trim()) {
+      results = [];
+      totalHits = totalPages = totalMeetings = totalMunis = 0;
+      hasMorePages = false;
+      hasSearched  = false;
+      return;
+    }
+
+    loading = true;
+    error   = null;
+    hasSearched = true;
+
+    try {
+      const { data, error: rpcError } = await supabase.rpc(
+        'search_paragraphs',
+        {
+          q: searchQuery,
+          page: currentPage,
+          pagesize: pageSize,
+          municipality_filter: muniFilter || null,
+          sort_by: sortBy.value || 'date'        // 'relevance' | 'date'
+        }
+      );
+      if (rpcError) throw rpcError;
+
+      results = data ?? [];
+
+      if (results.length) {
+        totalHits     = results[0].total_hits;
+        totalMeetings = results[0].total_meetings;
+        totalMunis    = results[0].total_munis;
+        totalPages    = Math.ceil(totalHits / pageSize);
+      } else {
+        totalHits = totalPages = totalMeetings = totalMunis = 0;
+      }
+      hasMorePages = currentPage < totalPages;
+    } catch (err) {
+      error = err.message;
+      results = [];
+      hasMorePages = false;
+      totalHits = totalPages = totalMeetings = totalMunis = 0;
+    } finally {
+      loading = false;
+    }
+  }
+
+  function handleSearch()   { currentPage = 1; hasSearched = false; searchParagraphs(); }
+  function goToPage(page)    { currentPage = page; searchParagraphs(); }
+
+  /* ─────────── fetch municipalities once ─────────── */
+  onMount(async () => {
+    const { data } = await supabase
+      .from('municipalities')
+      .select('municipality')
+      .order('municipality');
+    municipalities = data?.map(d => d.municipality) ?? [];
+  });
+
+  const sortOptions = [
+  { label: 'Newest first', value: 'date' },
+  { label: 'Relevance', value: 'relevance' }
+];
+</script>
+
+<!----- HTML ----->
+<main class="municipal-search">
+
+  <!-- Hero (unchanged except tighter padding) -->
+  <section class="hero">
+    <h1>Search Municipal Meetings</h1>
+
+    <!-- Search bar -->
+    <div class="search-bar">
+      <input
+        type="text"
+        placeholder="Enter a keyword…"
+        bind:value={searchQuery}
+        on:keyup={(e) => e.key === 'Enter' && handleSearch()} />
+      <button on:click={handleSearch} disabled={loading}>
+        {#if loading}<span class="spinner"></span>{/if}Search
+      </button>
+    </div>
+  </section>
+
+  <!-- Content layout -->
+  <div class="content">
+
+    <!-- Sidebar -------------------------------------------------------->
+    <aside class="sidebar">
+      <!-- Filters -->
+      <div class="card">
+        <h2>Filters</h2>
+        <Select
+          items={municipalities}
+          bind:value={muniFilter}
+          on:select={handleSearch}
+          clearable={true}
+          placeholder="All municipalities"
+          searchable={true}
+        />
+
+        <Select
+  items={sortOptions}
+  bind:value={sortBy}
+  on:select={handleSearch}
+  clearable={false}
+  search={false}
+/>
+      </div>
+
+      <!-- Summary (only when we have results) -->
+      {#if totalHits && !error}
+        <div class="card summary">
+          <div><span>{totalHits.toLocaleString()}</span><small>segments</small></div>
+          <div><span>{totalMeetings.toLocaleString()}</span><small>meetings</small></div>
+          <div><span>{totalMunis}</span><small>municipalities</small></div>
+        </div>
+      {/if}
+    </aside>
+
+    <!-- Results area --------------------------------------------------->
+    <section class="results">
+
+      {#if error}
+        <div class="alert error">Error: {error}</div>
+      {/if}
+
+      {#if totalHits && !error}
+        <div class="pager top">
+          <button on:click={() => goToPage(currentPage - 1)} disabled={currentPage===1||loading}>
+            ‹ Prev
+          </button>
+          <span>Page {currentPage} / {totalPages}</span>
+          <button on:click={() => goToPage(currentPage + 1)} disabled={!hasMorePages||loading}>
+            Next ›
+          </button>
+        </div>
+      {/if}
+
+      <!-- Results list -->
+      {#if results.length}
+        <ul class="results-list">
+          {#each results as r (r.id)}
+            <li class="result-card">
+              <header>
+                <h3>{r.title}</h3>
+                <span class="location">{r.municipality}, {r.province}</span>
+                <time>{formatDate(r.held_at)}</time>
+              </header>
+
+              <p class="excerpt">{@html highlight(r.text)}</p>
+
+              <footer>
+                {#if r.start_time}
+                  <span class="time">{formatTime(r.start_time)}</span>
+                {/if}
+                {#if r.video_url}
+                  <a href={ytLink(r.video_url, r.start_time)} target="_blank">Watch ▶</a>
+                {/if}
+              </footer>
+            </li>
+          {/each}
+        </ul>
+
+        <div class="pager bottom">
+          <button on:click={() => goToPage(currentPage - 1)} disabled={currentPage===1||loading}>
+            ‹ Prev
+          </button>
+          <span>Page {currentPage} / {totalPages}</span>
+          <button on:click={() => goToPage(currentPage + 1)} disabled={!hasMorePages||loading}>
+            Next ›
+          </button>
+        </div>
+      {:else if hasSearched && !loading && !error}
+        <div class="alert">No results found – try different terms.</div>
+      {/if}
+
+    </section>
+  </div>
+</main>
+
+<!----- CSS ----->
+<style>
+  :root {
+    /* Core palette – tweak only these */
+    --clr-bg:            #e8e8e3;   /* overall page background              */
+    --clr-surface:       #e8e8e3;   /* cards, dark panels, buttons          */
+    --clr-text:          #ffffff;    /* slightly lighter surface / borders   */
+    --clr-surface-glass: #deded1; /* glass‑y card background     */
+  
+    --clr-text:          #671923;   /* main copy color                      */
+    --clr-text-muted:    rgb(66, 69, 70);   /* subdued text (timestamps, hints)     */
+  
+    --clr-accent:        #671923;   /* brand / highlight                    */
+    --clr-accent-hover:  #671923;   /* hover / active state                 */
+  
+    --clr-error:         #ef4444;   /* error state     */ 
+    --clr-input:       #f7f6f6;   /* input fields, select boxes           */ 
+    
+  }
+  
+  /* ---------- Base ----------- */
+  :global(html){font-size:14px;}
+  :global(body){
+    margin:0;
+    color:var(--clr-text);
+    background:var(--clr-bg);
+    font-family:"stratos",sans-serif;
+    font-weight:400;
+    font-style:normal;
+  }
+  
+  *{box-sizing:border-box;margin:0;padding:0}
+  
+  /* Glassy cards */
+  .card{
+    background:var(--clr-surface-glass);
+    backdrop-filter:blur(12px);
+    border:1px solid var(--clr-surface-alt);
+    border-radius:10px;
+    padding:1rem;
+    margin-bottom:1rem;
+  }
+  
+  /* ---------- Svelte Select ----------- */
+  :global(.svelte-select){
+    border:1px solid var(--clr-accent)!important;
+    background-color: var(--clr-input)!important;
+    color:var(--clr-accent);
+    font-size:1rem!important;
+    border-radius:4px!important;
+    appearance:none;-webkit-appearance:none;-moz-appearance:none;
+    --font-size:1rem;
+    font-family:"stratos",sans-serif;
+    font-weight:400;
+    margin:2rem 0!important;
+  }
+  :global(.svelte-select input){
+    color:var(--clr-accent)!important;
+    font-size:1rem!important;
+  }
+  :global(.svelte-select-list){
+    font-size:1rem!important;
+    z-index:20!important;
+  }
+  :global(.svelte-select-list .item){background-color:var(--clr-surface-alt)!important;}
+  :global(.svelte-select-list .item.active){background-color:var(--clr-accent)!important;color:var(--clr-surface)!important;}
+  :global(.svelte-select-list .item:hover),
+  :global(.svelte-select-list .item.first.hover){background-color:var(--clr-accent-hover)!important;color:var(--clr-surface)!important;}
+  :global(.svelte-select-list .list-item){
+    background-color:var(--clr-surface-alt)!important;
+    opacity: 1 !important;
+  }
+  /* ---------- Hero ----------- */
+  .hero{text-align:center;padding:2rem 1rem 2.5rem;margin-top:2rem;}
+  .hero h1{
+    font-size:clamp(5rem,5vw,2.6rem);
+    color:var(--clr-text);
+    margin-bottom:.5rem;
+    font-family:"stratos",sans-serif;font-weight:200;text-transform:uppercase;
+  }
+  
+  /* Search bar */
+  .search-bar{display:flex;justify-content:center;gap:.75rem;flex-wrap:wrap}
+  .search-bar input{
+    flex:1 1 260px;max-width:400px;
+    background-color: var(--clr-input)!important;
+    border:1px solid var(--clr-surface);
+    border-radius:8px;
+    padding:.65rem .9rem;
+    color:var(--clr-text);
+    font-size:2rem;
+    margin-top:2rem;
+    font-family:"Stratos ExtraLight",sans-serif;font-weight:200;
+  }
+  .search-bar input:focus{outline:none;border-color:var(--clr-surface);}
+  
+  .search-bar button{
+    padding:.65rem 2rem;
+    border-radius:8px;
+    border:var(--clr-text) solid 1px;
+    background:none;
+    color:var(--clr-text);
+    cursor:pointer;
+    font-weight:600;
+    display:flex;align-items:center;gap:.5rem;
+    font-size:1rem;
+    margin-top:2rem;
+  }
+  
+  .spinner{width:14px;height:14px;border:2px solid #ffffff33;border-top:2px solid #fff;border-radius:50%;animation:spin 1s linear infinite}
+  @keyframes spin{to{transform:rotate(360deg)}}
+  
+  /* ---------- Layout ----------- */
+  .content{display:grid;grid-template-columns:240px 1fr;gap:1.75rem;max-width:1400px;margin:0 auto;padding:1.5rem 3rem;}
+  .sidebar{position:sticky;height:fit-content;margin-top:3rem;}
+  .results{min-width:0}
+  
+  /* ---------- Summary inside sidebar ----------- */
+  .summary{ display:grid;gap:.75rem;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));text-align:center;font-size:.8rem;z-index:1;position:relative;}
+  .sidebar .card:first-child{position:relative;z-index:10; padding:2rem}
+  .summary span{display:block;font-size:1.1rem;font-weight:700;color:var(--clr-accent);}
+  
+  /* ---------- Alerts ----------- */
+  .alert{
+    background:var(--clr-surface-alt);
+    border:1px solid var(--clr-surface-alt);
+    padding:.9rem 1rem;
+    border-radius:8px;
+    font-size:.85rem;
+    color:var(--clr-text-muted);
+    margin-bottom:1rem;
+  }
+  .alert.error{border-color:var(--clr-error);color:var(--clr-error);}
+  
+  /* ---------- Pagination ----------- */
+  .pager{display:flex;justify-content:center;align-items:center;gap:1rem;font-size:.8rem;}
+  .pager button{
+    background:var(--clr-surface);
+    border:1px solid var(--clr-surface-alt);
+    padding:.45rem .9rem;
+    border-radius:6px;
+    color:var(--clr-text-muted);
+    cursor:pointer;
+  }
+  .pager button:disabled{opacity:.35;cursor:not-allowed;}
+  
+  /* ---------- Results ----------- */
+  .results-list{list-style:none;display:flex;flex-direction:column;gap:2rem;margin-top:1rem;}
+  .result-card{
+    background:var(--clr-surface);
+    border:1px solid var(--clr-surface-alt);
+    border-bottom:1px solid var(--clr-accent);
+    padding:1rem 2rem;
+    font-size:1rem;
+    font-family:"Stratos ExtraLight",sans-serif;font-weight:200;
+  }
+  .result-card header{display:flex;justify-content:space-between;align-items:center;margin-bottom:.45rem;}
+  .result-card h3{
+    font-size:1.2rem;
+    font-weight:600;
+    color:var(--clr-text);
+    flex:1;
+    margin-right:.5rem;
+    line-height:1.35;
+    font-family:"Stratos",sans-serif;font-weight:400;
+  }
+  .result-card time{font-size:1rem;color:var(--clr-text-muted);white-space:nowrap;font-family:"Stratos",sans-serif;font-weight:400;}
+  .excerpt{color:var(--clr-text-muted);line-height:1.45;margin-bottom:.55rem;margin-top:1rem;}
+  .excerpt :global(mark){background:var(--clr-accent-hover);color:var(--clr-surface);padding:0 .3em;border-radius:3px;}
+  .result-card footer{display:flex;flex-wrap:wrap;gap:.75rem;font-size:.75rem;color:var(--clr-text-muted);align-items:center}
+  .result-card footer a{color:var(--clr-accent);text-decoration:none}
+  .location{
+    font-weight:600;
+    color:var(--clr-text-muted);
+    font-size:1rem;
+    padding: 0.2rem 1rem;
+    font-family:"Stratos",sans-serif;
+    font-weight:400;
+    background: var(--clr-surface-glass);
+    border-radius: 7px;
+    margin-right: 2rem;
+  
+  }
+  
+  /* ---------- Media queries ----------- */
+  @media(max-width:900px){.content{grid-template-columns:1fr}.sidebar{position:static;display:flex;gap:1rem;overflow-x:auto}.card{min-width:200px}}
+  @media(max-width:600px){.result-card{font-size:.78rem;padding:.8rem}.excerpt{-webkit-box-orient:vertical;-webkit-line-clamp:4;display:-webkit-box;overflow:hidden}}
+  </style>
+  
