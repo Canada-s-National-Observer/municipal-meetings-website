@@ -28,10 +28,10 @@
 
   /* UI controls */
   let municipalities = [];
-  let muniFilter     = '';           // '' = all
-  let sortBy         = 'date';       // 'relevance' | 'date'
+  let muniFilter     = null;        // will store an *object* {label,value} from <Select>
+  let sortBy         = { label: 'Newest first', value: 'date' };
 
-  let hasSearched    = false;        // guards “No results found”
+  let hasSearched    = false;       // guards “No results found”
 
   /* --- constants --- */
   const AVERAGE_WPM        = 150;      // tweak to suit your speakers
@@ -55,7 +55,7 @@
     return t.split(':').map(Number).reduce((acc, cur) => acc * 60 + cur, 0);
   }
 
-  /* --- first‑match utilities --- */
+  /* --- first-match utilities --- */
   function wordsBeforeFirstMention(text, termRegex) {
     if (!termRegex) return 0;
     const m = termRegex.exec(text);
@@ -71,7 +71,7 @@
     const words  = wordsBeforeFirstMention(row.text, termRegex);
     const base   = toSeconds(row.start_time); // seconds into the video where paragraph starts
     const offset = Math.round(words * SECONDS_PER_WORD); // ≈ seconds into paragraph
-    return Math.max(base + offset - 8, 0); // “-2 s” pre‑roll for context
+    return Math.max(base + offset - 8, 0); // “-8 s” pre-roll for context
   }
 
   /* build regex each time query changes */
@@ -96,7 +96,11 @@
 
   /* ─────────── Search RPC ─────────── */
   async function searchParagraphs() {
-    if (!searchQuery.trim()) {
+    const hasKeywords = searchQuery.trim().length > 0;
+    const hasMuni     = !!muniFilter;
+
+    if (!hasKeywords && !hasMuni) {
+      // Nothing to search for
       results = [];
       totalHits = totalPages = totalMeetings = totalMunis = 0;
       hasMorePages = false;
@@ -109,20 +113,27 @@
     hasSearched = true;
 
     const termRegex = (() => {
+      if (!hasKeywords) return null;
       const terms =
         searchQuery.match(/"[^"]+"|\w+/g)?.map(t => t.replace(/"/g, ''));
       return terms?.length ? new RegExp(`\\b(${terms.join('|')})\\b`, 'i') : null;
     })();
 
+    const muniParam = hasMuni
+      ? (typeof muniFilter === 'object' ? muniFilter.value : muniFilter)
+      : null;
+
+    const qParam = hasKeywords ? searchQuery : '';
+
     try {
       const { data, error: rpcError } = await supabase.rpc(
         'search_paragraphs',
         {
-          q: searchQuery,
+          q: qParam,
           page: currentPage,
           pagesize: pageSize,
-          municipality_filter: muniFilter || null,
-          sort_by: sortBy.value || 'date'        // 'relevance' | 'date'
+          municipality_filter: muniParam,
+          sort_by: typeof sortBy === 'object' ? sortBy.value : sortBy
         }
       );
       if (rpcError) throw rpcError;
@@ -151,21 +162,45 @@
     }
   }
 
-  function handleSearch()   { currentPage = 1; hasSearched = false; searchParagraphs(); }
-  function goToPage(page)    { currentPage = page; searchParagraphs(); }
+  function handleSearch() {
+    currentPage = 1;
+    searchParagraphs();
+  }
 
-  /* ─────────── fetch municipalities once ─────────── */
+  function goToPage(page) {
+    currentPage = page;
+    searchParagraphs();
+  }
+
+  let lastMuniValue = null;
+  $: if ((muniFilter ? muniFilter.value : null) !== lastMuniValue) {
+    if (lastMuniValue !== null) handleSearch();
+    lastMuniValue = muniFilter ? muniFilter.value : null;
+  }
+
   onMount(async () => {
-    const { data } = await supabase
+    const { data, error: joinError } = await supabase
       .from('municipalities')
-      .select('municipality')
+      .select('id, municipality, meetings!inner(id)')
       .order('municipality');
-    municipalities = data?.map(d => d.municipality) ?? [];
+
+    if (joinError) {
+      console.error('Error fetching municipalities with meetings:', joinError.message);
+      error = `Failed to load municipalities: ${joinError.message}`;
+      municipalities = [];
+      return;
+    }
+
+    municipalities = Array.from(
+      new Set(data.map(row => row.municipality))
+    )
+      .sort()
+      .map(muni => ({ label: muni, value: muni }));
   });
 
   const sortOptions = [
     { label: 'Newest first', value: 'date' },
-    { label: 'Relevance', value: 'relevance' }
+    { label: 'Relevance',    value: 'relevance' }
   ];
 </script>
 
