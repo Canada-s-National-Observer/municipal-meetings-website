@@ -233,7 +233,7 @@
   <img src="/location.png" alt="Municipal Search Logo" class="location-img" />
   <!-- Hero -->
   <section class="hero">
-    <h1>MUNICIPAL MEETINGS</h1>
+    <h1>Search Municipal Meetings</h1>
     <!-- Search bar -->
     <div class="search-bar">
       <input
@@ -291,8 +291,6 @@
         <div class="card summary">
           <div><span>{totalHits.toLocaleString()}</span><small>segments</small></div>
           <div><span>{totalMeetings.toLocaleString()}</span><small>meetings</small></div>
-          <div><span>{totalMunis}</span><small>municipalities</small></div>
-          <div><span>{totalProvinces}</span><small>provinces</small></div>
         </div>
       {/if}
     </aside>
@@ -370,7 +368,6 @@
     /* Core palette – tweak only these */
     --clr-bg:            #e8e8e3;   /* overall page background              */
     --clr-surface:       #e8e8e3;   /* cards, dark panels, buttons          */
-    --clr-text:          #ffffff;    /* slightly lighter surface / borders   */
     --clr-surface-glass: #deded1; /* glass‑y card background     */
   
     --clr-text:          #671923;   /* main copy color                      */
@@ -390,9 +387,9 @@
     margin:0;
     color:var(--clr-text);
     background-color:var(--clr-bg);
-    font-family:"stratos",sans-serif;
-    font-weight:400;
-    font-style:normal;
+    font-family: "finalsix", sans-serif;
+font-weight: 500;
+font-style: normal;
   }
 
   
@@ -427,7 +424,9 @@
   a {
     font-size: 0.8rem;
     font-weight: bold;
-    font-family: "stratos", sans-serif;
+    font-family: "finalsix", sans-serif;
+font-weight: 500;
+font-style: normal;
   }
   
   /* ---------- Svelte Select ----------- */
@@ -439,14 +438,16 @@
     border-radius:4px!important;
     appearance:none;-webkit-appearance:none;-moz-appearance:none;
     --font-size:1rem;
-    font-family:"stratos",sans-serif;
-    font-weight:400;
+    font-family: "finalsix", sans-serif !important;
+font-weight: 400;
+font-style: normal;
     margin:2rem 0!important;
     box-shadow: rgba(0, 0, 0, 0.16) 0px 10px 36px 0px, rgba(0, 0, 0, 0.06) 0px 0px 0px 1px !important;
   }
   :global(.svelte-select input){
     color:var(--clr-accent)!important;
     font-size:1rem!important;
+    font-family: "finalsix", sans-serif !important;
   }
   :global(.svelte-select-list){
     font-size:1rem!important;
@@ -463,13 +464,16 @@
   /* ---------- Hero ----------- */
   .hero{text-align:center;padding:2rem 1rem 2.5rem;margin-top:2rem;position: relative;}
   .hero h1{
-    font-size:clamp(7rem,5vw,2.6rem);
-    color: white;
+    font-size:clamp(3rem,5vw,2.6rem);
+    color: var(--clr-text);
     margin-bottom:.5rem;
-    text-shadow:
-    1.5px 1.5px 3px rgba(0, 0, 0, 0.3),
-   -1px -1px 1px rgba(255, 255, 255, 0.5);
-    font-family:"stratos",sans-serif;font-weight:200;text-transform:uppercase;
+    
+    font-family: "finalsix", sans-serif;
+font-weight: 500;
+font-style: normal;
+    
+    
+    text-transform:uppercase;
   }
 
   /* Search bar */
@@ -480,15 +484,22 @@
     border:1px solid var(--clr-surface);
     border-radius:8px;
     padding:.65rem .9rem;
-    color:var(--clr-text);
-    font-size:2rem;
+    color:#a2a2a2;
+    font-size:1.5rem;
     margin-top:2rem;
     margin-right: 1.5rem;
-    font-family:"Stratos ExtraLight",sans-serif;font-weight:200;
+    font-family: "finalsix", sans-serif;
+font-weight: 400;
+font-style: normal;
     box-shadow: rgba(0, 0, 0, 0.16) 0px 10px 36px 0px, rgba(0, 0, 0, 0.06) 0px 0px 0px 1px;
   }
   .search-bar input:focus{outline:none;border-color:var(--clr-surface);}
   
+  .search-bar input::placeholder{
+    color:rgba(0, 0, 0, 0.112);
+    font-weight:400;
+    font-weight:200;
+  }
   .search-bar button{
     all: unset;
     padding:.65rem 2rem;
@@ -507,7 +518,7 @@
 
   .search-bar button:hover{
 
-    background-color: rgba(105, 19, 40, 0.071);
+    background-color: rgba(217, 189, 195, 0.07);
 
 
   }
@@ -568,8 +579,10 @@
     border:1px solid var(--clr-surface-alt);
     border-bottom:1px solid var(--clr-accent);
     padding:1rem 2rem;
-    font-size:1rem;
-    font-family:"Stratos ExtraLight",sans-serif;font-weight:200;
+    font-size:1.05rem;
+    font-family: "dinosaur", sans-serif;
+font-weight: 300;
+font-style: normal;
   }
   .result-card header{display:flex;justify-content:space-between;align-items:center;margin-bottom:.45rem;}
   .result-card h3{
@@ -579,9 +592,13 @@
     flex:1;
     margin-right:.5rem;
     line-height:1.35;
-    font-family:"Stratos",sans-serif;font-weight:400;
+    font-family: "finalsix", sans-serif;
+font-weight: 500;
+font-style: normal;
   }
-  .result-card time{font-size:1rem;color:var(--clr-text-muted);white-space:nowrap;font-family:"Stratos",sans-serif;font-weight:400;}
+  .result-card time{font-size:1rem;color:var(--clr-text-muted);white-space:nowrap;font-family: "finalsix", sans-serif;
+font-weight: 300;
+font-style: normal;}
   .excerpt{color:var(--clr-text-muted);line-height:1.45;margin-bottom:.55rem;margin-top:1rem;}
   .excerpt :global(mark){background:var(--clr-accent-hover);color:var(--clr-surface);padding:0 .3em;border-radius:3px;}
   .result-card footer{display:flex;flex-wrap:wrap;gap:.75rem;font-size:.75rem;color:var(--clr-text-muted);align-items:center}
@@ -591,7 +608,9 @@
     color:var(--clr-text-muted);
     font-size:1rem;
     padding: 0.2rem 1rem;
-    font-family:"Stratos",sans-serif;
+    font-family: "finalsix", sans-serif;
+font-weight: 500;
+font-style: normal;
     font-weight:400;
     background: var(--clr-surface-glass);
     border-radius: 7px;
