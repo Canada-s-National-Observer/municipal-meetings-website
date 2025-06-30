@@ -1,4 +1,5 @@
 <script>
+	import App from './App.svelte';
   import { onMount } from 'svelte';
   import { createClient } from '@supabase/supabase-js';
   import Select from 'svelte-select';
@@ -23,13 +24,16 @@
   let totalPages    = 0;
 
   /* summary counts */
-  let totalMeetings = 0;
-  let totalMunis    = 0;
+  let totalMeetings   = 0;
+  let totalMunis      = 0;
+  let totalProvinces  = 0;
 
   /* UI controls */
-  let municipalities = [];
-  let muniFilter     = null;        // will store an *object* {label,value} from <Select>
-  let sortBy         = { label: 'Newest first', value: 'date' };
+  let municipalities  = [];
+  let muniFilter      = null;        // {label,value}
+  let provinces       = [];
+  let provinceFilter  = null;        // {label,value}
+  let sortBy          = { label: 'Newest first', value: 'date' };
 
   let hasSearched    = false;       // guards “No results found”
 
@@ -96,13 +100,14 @@
 
   /* ─────────── Search RPC ─────────── */
   async function searchParagraphs() {
-    const hasKeywords = searchQuery.trim().length > 0;
-    const hasMuni     = !!muniFilter;
+    const hasKeywords  = searchQuery.trim().length > 0;
+    const hasMuni      = !!muniFilter;
+    const hasProvince  = !!provinceFilter;
 
-    if (!hasKeywords && !hasMuni) {
+    if (!hasKeywords && !hasMuni && !hasProvince) {
       // Nothing to search for
       results = [];
-      totalHits = totalPages = totalMeetings = totalMunis = 0;
+      totalHits = totalPages = totalMeetings = totalMunis = totalProvinces = 0;
       hasMorePages = false;
       hasSearched  = false;
       return;
@@ -123,6 +128,10 @@
       ? (typeof muniFilter === 'object' ? muniFilter.value : muniFilter)
       : null;
 
+    const provParam = hasProvince
+      ? (typeof provinceFilter === 'object' ? provinceFilter.value : provinceFilter)
+      : null;
+
     const qParam = hasKeywords ? searchQuery : '';
 
     try {
@@ -133,6 +142,7 @@
           page: currentPage,
           pagesize: pageSize,
           municipality_filter: muniParam,
+          province_filter:     provParam,
           sort_by: typeof sortBy === 'object' ? sortBy.value : sortBy
         }
       );
@@ -144,19 +154,20 @@
       }));
 
       if (results.length) {
-        totalHits     = results[0].total_hits;
-        totalMeetings = results[0].total_meetings;
-        totalMunis    = results[0].total_munis;
-        totalPages    = Math.ceil(totalHits / pageSize);
+        totalHits       = results[0].total_hits;
+        totalMeetings   = results[0].total_meetings;
+        totalMunis      = results[0].total_munis;
+        totalProvinces  = results[0].total_provinces ?? 0;
+        totalPages      = Math.ceil(totalHits / pageSize);
       } else {
-        totalHits = totalPages = totalMeetings = totalMunis = 0;
+        totalHits = totalPages = totalMeetings = totalMunis = totalProvinces = 0;
       }
       hasMorePages = currentPage < totalPages;
     } catch (err) {
       error = err.message;
       results = [];
       hasMorePages = false;
-      totalHits = totalPages = totalMeetings = totalMunis = 0;
+      totalHits = totalPages = totalMeetings = totalMunis = totalProvinces = 0;
     } finally {
       loading = false;
     }
@@ -172,30 +183,42 @@
     searchParagraphs();
   }
 
+  /* — watch filters — */
   let lastMuniValue = null;
   $: if ((muniFilter ? muniFilter.value : null) !== lastMuniValue) {
     if (lastMuniValue !== null) handleSearch();
     lastMuniValue = muniFilter ? muniFilter.value : null;
   }
 
+  let lastProvValue = null;
+  $: if ((provinceFilter ? provinceFilter.value : null) !== lastProvValue) {
+    if (lastProvValue !== null) handleSearch();
+    lastProvValue = provinceFilter ? provinceFilter.value : null;
+  }
+
+  /* ─────────── Load dropdown options ─────────── */
   onMount(async () => {
     const { data, error: joinError } = await supabase
       .from('municipalities')
-      .select('id, municipality, meetings!inner(id)')
+      .select('id, municipality, province, meetings!inner(id)')
       .order('municipality');
 
     if (joinError) {
-      console.error('Error fetching municipalities with meetings:', joinError.message);
-      error = `Failed to load municipalities: ${joinError.message}`;
-      municipalities = [];
+      console.error('Error fetching municipalities / provinces:', joinError.message);
+      error = `Failed to load filters: ${joinError.message}`;
+      municipalities = provinces = [];
       return;
     }
 
-    municipalities = Array.from(
-      new Set(data.map(row => row.municipality))
-    )
+    /* municipalities */
+    municipalities = Array.from(new Set(data.map(row => row.municipality)))
       .sort()
       .map(muni => ({ label: muni, value: muni }));
+
+    /* provinces */
+    provinces = Array.from(new Set(data.map(row => row.province)))
+      .sort()
+      .map(p => ({ label: p, value: p }));
   });
 
   const sortOptions = [
@@ -206,11 +229,11 @@
 
 <!----- HTML ----->
 <main class="municipal-search">
-
-  <!-- Hero (unchanged except tighter padding) -->
+  <img src="/spyglass.png" alt="Municipal Search Logo" class="spyglass-img" />
+  <img src="/location.png" alt="Municipal Search Logo" class="location-img" />
+  <!-- Hero -->
   <section class="hero">
-    <h1>Search Municipal Meetings</h1>
-
+    <h1>MUNICIPAL MEETINGS</h1>
     <!-- Search bar -->
     <div class="search-bar">
       <input
@@ -232,6 +255,18 @@
       <!-- Filters -->
       <div class="card">
         <h2>Filters</h2>
+
+        <!-- Province filter -->
+        <Select
+          items={provinces}
+          bind:value={provinceFilter}
+          on:select={handleSearch}
+          clearable={true}
+          placeholder="All provinces"
+          searchable={true}
+        />
+
+        <!-- Municipality filter -->
         <Select
           items={municipalities}
           bind:value={muniFilter}
@@ -241,13 +276,14 @@
           searchable={true}
         />
 
+        <!-- Sort selector -->
         <Select
-  items={sortOptions}
-  bind:value={sortBy}
-  on:select={handleSearch}
-  clearable={false}
-  search={false}
-/>
+          items={sortOptions}
+          bind:value={sortBy}
+          on:select={handleSearch}
+          clearable={false}
+          search={false}
+        />
       </div>
 
       <!-- Summary (only when we have results) -->
@@ -256,6 +292,7 @@
           <div><span>{totalHits.toLocaleString()}</span><small>segments</small></div>
           <div><span>{totalMeetings.toLocaleString()}</span><small>meetings</small></div>
           <div><span>{totalMunis}</span><small>municipalities</small></div>
+          <div><span>{totalProvinces}</span><small>provinces</small></div>
         </div>
       {/if}
     </aside>
@@ -352,11 +389,12 @@
   :global(body){
     margin:0;
     color:var(--clr-text);
-    background:var(--clr-bg);
+    background-color:var(--clr-bg);
     font-family:"stratos",sans-serif;
     font-weight:400;
     font-style:normal;
   }
+
   
   *{box-sizing:border-box;margin:0;padding:0}
   
@@ -370,6 +408,22 @@
     margin-bottom:1rem;
   }
 
+  img {
+    position: absolute;
+  }
+
+  .spyglass-img {
+    top: 0rem;
+    left: 0rem;
+    width: 250px;
+  }
+
+  .location-img {
+    top: 0rem;
+    right: 0rem;
+    width: 250px;
+  }
+
   a {
     font-size: 0.8rem;
     font-weight: bold;
@@ -378,7 +432,7 @@
   
   /* ---------- Svelte Select ----------- */
   :global(.svelte-select){
-    border:1px solid var(--clr-accent)!important;
+
     background-color: var(--clr-input)!important;
     color:var(--clr-accent);
     font-size:1rem!important;
@@ -388,6 +442,7 @@
     font-family:"stratos",sans-serif;
     font-weight:400;
     margin:2rem 0!important;
+    box-shadow: rgba(0, 0, 0, 0.16) 0px 10px 36px 0px, rgba(0, 0, 0, 0.06) 0px 0px 0px 1px !important;
   }
   :global(.svelte-select input){
     color:var(--clr-accent)!important;
@@ -406,14 +461,17 @@
     opacity: 1 !important;
   }
   /* ---------- Hero ----------- */
-  .hero{text-align:center;padding:2rem 1rem 2.5rem;margin-top:2rem;}
+  .hero{text-align:center;padding:2rem 1rem 2.5rem;margin-top:2rem;position: relative;}
   .hero h1{
-    font-size:clamp(5rem,5vw,2.6rem);
-    color:var(--clr-text);
+    font-size:clamp(7rem,5vw,2.6rem);
+    color: white;
     margin-bottom:.5rem;
+    text-shadow:
+    1.5px 1.5px 3px rgba(0, 0, 0, 0.3),
+   -1px -1px 1px rgba(255, 255, 255, 0.5);
     font-family:"stratos",sans-serif;font-weight:200;text-transform:uppercase;
   }
-  
+
   /* Search bar */
   .search-bar{display:flex;justify-content:center;gap:.75rem;flex-wrap:wrap}
   .search-bar input{
@@ -425,14 +483,16 @@
     color:var(--clr-text);
     font-size:2rem;
     margin-top:2rem;
+    margin-right: 1.5rem;
     font-family:"Stratos ExtraLight",sans-serif;font-weight:200;
+    box-shadow: rgba(0, 0, 0, 0.16) 0px 10px 36px 0px, rgba(0, 0, 0, 0.06) 0px 0px 0px 1px;
   }
   .search-bar input:focus{outline:none;border-color:var(--clr-surface);}
   
   .search-bar button{
+    all: unset;
     padding:.65rem 2rem;
     border-radius:8px;
-    border:var(--clr-text) solid 1px;
     background:none;
     color:var(--clr-text);
     cursor:pointer;
@@ -440,6 +500,16 @@
     display:flex;align-items:center;gap:.5rem;
     font-size:1rem;
     margin-top:2rem;
+    transition: all .2s ease-in-out;
+    box-shadow: rgba(0, 0, 0, 0.16) 0px 10px 36px 0px, rgba(0, 0, 0, 0.06) 0px 0px 0px 1px;
+  }
+
+
+  .search-bar button:hover{
+
+    background-color: rgba(105, 19, 40, 0.071);
+
+
   }
   
   .spinner{width:14px;height:14px;border:2px solid #ffffff33;border-top:2px solid #fff;border-radius:50%;animation:spin 1s linear infinite}
@@ -447,12 +517,24 @@
   
   /* ---------- Layout ----------- */
   .content{display:grid;grid-template-columns:240px 1fr;gap:1.75rem;max-width:1400px;margin:0 auto;padding:1.5rem 3rem;}
-  .sidebar{position:sticky;height:fit-content;margin-top:3rem;}
+  .sidebar{
+    position:sticky;height:fit-content;margin-top:3rem;
+  }
   .results{min-width:0}
   
   /* ---------- Summary inside sidebar ----------- */
-  .summary{ display:grid;gap:.75rem;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));text-align:center;font-size:.8rem;z-index:1;position:relative;}
-  .sidebar .card:first-child{position:relative;z-index:10; padding:2rem}
+  .summary{ 
+    display:grid;gap:.75rem;grid-template-columns:repeat(auto-fill,minmax(90px,1fr));text-align:center;font-size:.8rem;z-index:1;position:relative;}
+  
+    .sidebar .card{
+
+
+      box-shadow: rgba(50, 50, 105, 0.15) 0px 2px 5px 0px, rgba(0, 0, 0, 0.05) 0px 1px 1px 0px;
+   
+    }
+  
+  
+    .sidebar .card:first-child{position:relative;z-index:10; padding:2rem}
   .summary span{display:block;font-size:1.1rem;font-weight:700;color:var(--clr-accent);}
   
   /* ---------- Alerts ----------- */
