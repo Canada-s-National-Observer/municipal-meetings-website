@@ -36,6 +36,12 @@
   let sortBy          = { label: 'Newest first', value: 'date' };
 
   let hasSearched    = false;       // guards “No results found”
+  $: provinceOnly = !searchQuery.trim() && !muniFilter && !!provinceFilter;
+
+  // when searchQuery updates hasSearched is reset
+  $: if (searchQuery) {
+    hasSearched = false;
+  }
 
   /* --- constants --- */
   const AVERAGE_WPM        = 150;      // tweak to suit your speakers
@@ -98,11 +104,27 @@
     return `${url}${url.includes('?') ? '&' : '?'}t=${sec}s`;
   }
 
+  async function retry(fn, retries = 3, delay = 1000) {
+  for (let i = 0; i < retries; i++) {
+    try {
+      return await fn();
+    } catch (err) {
+      if (i === retries - 1) throw err;
+      await new Promise(r => setTimeout(r, delay));
+    }
+  }
+}
+
   /* ─────────── Search RPC ─────────── */
   async function searchParagraphs() {
     const hasKeywords  = searchQuery.trim().length > 0;
     const hasMuni      = !!muniFilter;
     const hasProvince  = !!provinceFilter;
+
+    if (provinceOnly) {
+      hasSearched = true;
+      return;
+    }
 
     if (!hasKeywords && !hasMuni && !hasProvince) {
       // Nothing to search for
@@ -134,19 +156,33 @@
 
     const qParam = hasKeywords ? searchQuery : '';
 
+    const rpcName =
+      (!hasKeywords && (hasProvince || hasMuni))
+        ? 'search_paragraphs_geo'
+        : 'search_paragraphs';
+
+    console.log(
+      `RPC: ${rpcName} q=${qParam}, page=${currentPage}, pagesize=${pageSize}, ` +
+      `muni=${muniParam}, prov=${provParam}, sort_by=${sortBy}`
+    );
+
     try {
-      const { data, error: rpcError } = await supabase.rpc(
-        'search_paragraphs',
-        {
-          q: qParam,
-          page: currentPage,
-          pagesize: pageSize,
-          municipality_filter: muniParam,
-          province_filter:     provParam,
-          sort_by: typeof sortBy === 'object' ? sortBy.value : sortBy
-        }
-      );
-      if (rpcError) throw rpcError;
+      let data;
+      await retry(async () => {
+        const response = await supabase.rpc(
+          rpcName,
+          {
+            q: qParam,
+            page: currentPage,
+            pagesize: pageSize,
+            municipality_filter: muniParam,
+            province_filter:     provParam,
+            sort_by: typeof sortBy === 'object' ? sortBy.value : sortBy
+          }
+        );
+        if (response.error) throw response.error;
+        data = response.data;
+});
 
       results = (data ?? []).map(r => ({
         ...r,
@@ -230,7 +266,6 @@
 <!----- HTML ----->
 <main class="municipal-search">
   <img src="/spyglass.png" alt="Municipal Search Logo" class="spyglass-img" />
-  <img src="/location.png" alt="Municipal Search Logo" class="location-img" />
   <!-- Hero -->
   <section class="hero">
     <h1>Search Municipal Meetings</h1>
@@ -354,7 +389,8 @@
             Next ›
           </button>
         </div>
-      {:else if hasSearched && !loading && !error}
+   
+      {:else if hasSearched && !loading && !error && !provinceOnly}
         <div class="alert">No results found – try different terms.</div>
       {/if}
 
@@ -368,13 +404,13 @@
     /* Core palette – tweak only these */
     --clr-bg:            #e8e8e3;   /* overall page background              */
     --clr-surface:       #e8e8e3;   /* cards, dark panels, buttons          */
-    --clr-surface-glass: #deded1; /* glass‑y card background     */
+    --clr-surface-glass: #fbfbfb; /* glass‑y card background     */
   
-    --clr-text:          #671923;   /* main copy color                      */
+    --clr-text:          #1a4190;   /* main copy color                      */
     --clr-text-muted:    rgb(66, 69, 70);   /* subdued text (timestamps, hints)     */
   
-    --clr-accent:        #671923;   /* brand / highlight                    */
-    --clr-accent-hover:  #671923;   /* hover / active state                 */
+    --clr-accent:        #1a4190;   /* brand / highlight                    */
+    --clr-accent-hover:  #1a4190;   /* hover / active state                 */
   
     --clr-error:         #ef4444;   /* error state     */ 
     --clr-input:       #f7f6f6;   /* input fields, select boxes           */ 
@@ -412,12 +448,6 @@ font-style: normal;
   .spyglass-img {
     top: 0rem;
     left: 0rem;
-    width: 250px;
-  }
-
-  .location-img {
-    top: 0rem;
-    right: 0rem;
     width: 250px;
   }
 
@@ -465,7 +495,10 @@ font-style: normal;
   .hero{text-align:center;padding:2rem 1rem 2.5rem;margin-top:2rem;position: relative;}
   .hero h1{
     font-size:clamp(3rem,5vw,2.6rem);
-    color: var(--clr-text);
+    color:var(--clr-text);
+    text-shadow:
+    1px 1px 2px rgba(0, 0, 0, 0.4),
+   -1px -1px 0 rgba(255, 255, 255, 0.4);
     margin-bottom:.5rem;
     
     font-family: "finalsix", sans-serif;
@@ -484,7 +517,7 @@ font-style: normal;
     border:1px solid var(--clr-surface);
     border-radius:8px;
     padding:.65rem .9rem;
-    color:#a2a2a2;
+    color:#4f5259;
     font-size:1.5rem;
     margin-top:2rem;
     margin-right: 1.5rem;
@@ -581,7 +614,7 @@ font-style: normal;
     padding:1rem 2rem;
     font-size:1.05rem;
     font-family: "dinosaur", sans-serif;
-font-weight: 300;
+font-weight: 400;
 font-style: normal;
   }
   .result-card header{display:flex;justify-content:space-between;align-items:center;margin-bottom:.45rem;}
@@ -615,7 +648,9 @@ font-style: normal;
     background: var(--clr-surface-glass);
     border-radius: 7px;
     margin-right: 2rem;
-  
+
+    box-shadow: rgba(0, 0, 0, 0.05) 0px 6px 24px 0px, rgba(0, 0, 0, 0.08) 0px 0px 0px 1px;
+
   }
   
   /* ---------- Media queries ----------- */
